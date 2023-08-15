@@ -354,7 +354,7 @@ class GalaxyCatalogScatteringOp:
             if self.survey_mask is None or (not np.array_equal(self.survey_mask, survey_mask) and self.dynamic_mask):
                 self.survey_mask = survey_mask
                 self.compute_wavelet_masks()
-                self.survey_mask_vol_fraction = self.survey_mask.sum(axis=(-3, -2, -1)) / (self.Ngrid[0]*self.Ngrid[1]*self.Ngrid[2])
+                self.survey_mask_vol_fraction = np.logical_not(self.survey_mask).sum(axis=(-3, -2, -1)) / (self.Ngrid[0]*self.Ngrid[1]*self.Ngrid[2])
 
         # Need to subtract the mean if pbc
         if not survey_geometry:
@@ -506,6 +506,280 @@ class GalaxyCatalogScatteringOp:
             output += (ngal,)
         if ret_alpha:
             output += (alpha,)
+
+        # For debug
+        if return_mask_averaged:
+            abs_filtered_masked = abs_filtered * self.wavelet_masks
+            masked_average = np.zeros((self.moments.shape[0], abs_filtered.shape[0]))
+            for i in range(self.moments.shape[0]):
+                masked_average[i] = (abs_filtered_masked ** self.moments[i]).mean(axis=(-3, -2, -1)) / self.wavelet_masks_vol_fraction
+            output = output + (masked_average,)
+        if return_full_averaged:
+            full_average = np.zeros((self.moments.shape[0], abs_filtered.shape[0]))
+            for i in range(self.moments.shape[0]):
+                full_average[i] = (abs_filtered ** self.moments[i]).mean(axis=(-3, -2, -1)) / self.wavelet_masks_vol_fraction
+            output = output + (full_average,)
+        if return_abs_filtered_fields:
+            output = output + (abs_filtered,)
+        if return_masked_abs_filtered_fields:
+            output = output + (abs_filtered * self.wavelet_masks,)
+        
+        return output
+
+class ScatteringOp:
+    """Wavelet Scattering Transform (WST) for fields.
+    This class enables the computation of wavelet scattering transform coefficients from a 3D density field.
+    Coefficients are of the form:
+        S_0(p) = <|x|^p>,
+        S_1(l, p) = <|x*psi_l|^p>,
+        S_2(l1, l2, p) = <||x*psi_l1|*psi_l2|^p>,
+    where * stands for the convolution operation, x is the target field, and {psi_l} are a set of wavelets.
+    These wavelets can be oriented. Their design is inspired by Lanusse+2012 and Eickenberg+2022.
+    The wavelet transform can also be eroded with respect to the respective approximate supports of the wavelets (defined by |w| > erosion.theshold*max |w|).
+    """
+    
+    def __init__(self, J, Q=1, kc=np.pi, angular_width=None, aliasing=True,
+                 erosion_threshold=None, fwavelets=None, wavelet_masks=None,
+                 moments=(1/2, 1, 2),
+                 scattering=False,
+                 Ngrid=(256, 256, 256), BoxSize=1000.0, BoxCenter=[0.0, 0.0, 0.0], los=None,
+                 los_auto_detection=True,
+                 use_mp=True):
+        """Constructor.
+        Configure the wavelet parameters (J, Q, kc, angular_width, aliasing, erosion_threshold, fwavelets, wavelet_masks),
+        the coefficients that we want to compute (moments, scattering),
+        and the mesh grid defined from galaxy catalogs (Ngrid, BoxSize, BoxCenter, los, los_auto_detection, kmax, boxsize_powoftwomult, boxsize_auto_adjustment, FKP_weights, P0).
+
+        If wavelets need to be recomputed, it is safer to create a new object.
+
+        Args:
+            J (int): Wavelet bank parameter. Number of j values (i.e. octaves).
+            Q (int, optional): Wavelet bank parameter. Number of q values (i.e. scales per octave). Defaults to 1.
+            kc (float, optional): Wavelet bank parameter. Cutoff frequency of the mother wavelet. Defaults to np.pi.
+            angular_width (float, optional): Wavelet bank parameter. Angular width of the gaussian function used to orient the wavelets. Defaults to None.
+            aliasing (bool, optional): Shall we build aliased wavelets when kc > pi/2? Defaults to True.
+            erosion_threshold (float, optional): Erosion threshold that controls the erosion of the wavelet transform according to the survey geometry. Defaults to None.
+            fwavelets (array, optional): Bank of wavelets in Fourier space. Defaults to None, i.e. will be computed.
+            wavelet_masks (array, optional): Erosion masks for each wavelet. Defaults to None, i.e. will be computed.
+            moments (tuple, optional): Tuple of exponenets used to compute the WST coefficients. Defaults to (1/2, 1, 2).
+            scattering (bool, optional): Shall we compute S_2 coefficients? Defaults to False.
+            Ngrid (tuple, optional): Tuple of length 3 describing the mesh grid size on which galaxy catalogs are mapped to. Defaults to (256, 256, 256).
+            BoxSize (float or array, optional): Float or array of length 3 describing the mesh physical size (in Mpc/h). Defaults to 1000.0.
+            BoxCenter (list, optional): Array of length 3 corresponding to the mesh physical center (in Mpc/h). Defaults to [0.0, 0.0, 0.0].
+            los (array, optional): Array of length 3 defining a line of sight for the orientation of the wavelets. Defaults to None.
+            los_auto_detection (bool, optional): Auto-detection of the line of sight relying on BoxCenter. Defaults to True.
+            use_mp (bool, optional): Shall we use multiprocessing to compute the wavelets and theirs masks? Defaults to True.
+        """
+        # Wavelet parameters
+        self.J = J
+        self.Q = Q
+        self.kc = kc
+        self.angular_width = angular_width
+        self.aliasing = aliasing # Aliasing
+        self.orientations = None
+        self.nb_orientations = 0 # Number of orientations (as if isotropic for now)
+
+        # Wavelet transform erosion related parameters
+        self.fwavelets = fwavelets
+        self.wavelet_masks = wavelet_masks
+        self.erosion_threshold = erosion_threshold
+        self.erosion = self.erosion_threshold is not None
+
+        # Wavelet-based statistics parameters
+        self.moments = np.array(moments)
+        self.scattering = scattering
+
+        # Multiprocessing
+        self.use_mp = use_mp # Use multiprocessing when possible
+
+        # Box parameters
+        self.BoxSize = BoxSize # in Mpc
+        self.BoxCenter = BoxCenter # in Mpc
+        self.los = los
+        if los_auto_detection:
+            n = np.linalg.norm(self.BoxCenter)
+            if n != 0.0:
+                self.los = self.BoxCenter / n
+            else:
+                self.los = np.array([1.0, 0.0, 0.0])
+        self.Ngrid = Ngrid
+        self.dx, self.dy, self.dz = 1.0, 1.0, 1.0 # default values (in Mpc)
+        self.dmin = min([self.dx, self.dy, self.dz])
+        self.survey_mask = None # (True for cells out of the survey domain)
+    
+    
+    def __call__(self, galaxies, *args, **kwargs):
+        return self.forward(galaxies, *args, **kwargs)
+
+    def build_wavelets(self):
+        """Build and store wavelets in Fourier space.
+        If self.angular_width is not None, then these are oriented wavelets with orientations corresponding to the vertices of a half regular dodecahedron.
+        Else, these are isotropic wavelets.
+        The wavelet design is inspired by Lanusse+2012 and Eickenberg+2022.
+        """
+        print("Computing wavelets...")
+
+        # Build wavelets (might be scaled differently for each axis)
+        if self.angular_width is not None:
+            orientations = get_dodecahedron_vertices(half=True, los=self.los)
+            self.orientations = orientations
+            self.nb_orientations = len(orientations)
+        fwavelets = lanusse_fwavelet_3d_bank(self.Ngrid, J=self.J, Q=self.Q, kc=self.kc,
+                                             orientations=self.orientations, angular_width=self.angular_width, 
+                                             axes_weights=[self.dx/self.dmin, self.dy/self.dmin, self.dz/self.dmin], 
+                                             aliasing=self.aliasing, use_mp=self.use_mp)
+
+        self.fwavelets = fwavelets.real.astype(np.float32) # These wavelets are real-valued in Fourier space + single precision to speed up computations
+
+        print("Done!")
+
+    def compute_wavelet_masks(self):
+        """Compute erosion masks for the wavelet transform.
+        For each wavelet, we define an approximate support in physical space that is parametererized by self.erosion_threshold parameter.
+        This approximate support is defined by the domain where |w| > self.erosion.theshold*max |w|.
+        """
+        print("Computing masks for the wavelet transform...")
+
+        if self.fwavelets is None:
+            self.build_wavelets()
+
+        # Define wavelet supports according to self.erosion_threshold parameter
+        wavelets = np.fft.ifftn(self.fwavelets, axes=(-1, -2, -3)).real
+        wavelets_renormalized = wavelets.copy()
+        for i in range(self.J*self.Q):
+            wavelets_renormalized[i] *= 2**(3*i/self.Q)
+        wavelets_max = np.absolute(wavelets_renormalized).max()
+        wavelets_supports = np.absolute(wavelets_renormalized) > self.erosion_threshold*wavelets_max
+        
+        # Mask per wavelet for erosion
+        if self.nb_orientations != 0:
+            wavelets_supports = np.reshape(wavelets_supports, (-1,) + wavelets_supports.shape[-3:])
+        masks_per_wavelet = np.zeros(wavelets_supports.shape, dtype=bool)
+        if self.use_mp:
+            mask_erosion_para_partial = partial(mask_erosion_para, mask=self.survey_mask, kernels=wavelets_supports)
+            work = np.arange(masks_per_wavelet.shape[0])
+            nb_processes = min(os.cpu_count(), len(work))
+            work_list = np.array_split(work, nb_processes)
+            pool = mp.Pool(processes=nb_processes)
+            results = pool.map(mask_erosion_para_partial, work_list)
+            cnt = 0
+            for i in range(len(results)):
+                masks_per_wavelet[cnt: cnt + results[i].shape[0]] = results[i]
+                cnt += results[i].shape[0]
+            pool.close()
+        else:
+            for i in range(masks_per_wavelet.shape[0]):
+                masks_per_wavelet[i] = mask_erosion(self.survey_mask, wavelets_supports[i])
+        if self.nb_orientations != 0:
+            masks_per_wavelet = np.reshape(masks_per_wavelet, (self.J*self.Q, self.nb_orientations) + masks_per_wavelet.shape[-3:])
+        self.wavelet_masks = ~masks_per_wavelet
+        self.wavelet_masks_vol_fraction = self.wavelet_masks.sum(axis=(-3, -2, -1)) / (self.Ngrid[0]*self.Ngrid[1]*self.Ngrid[2])
+
+        print("Done!")
+    
+    def forward(self, x, survey_geometry=True,
+                return_mask_averaged=False, return_full_averaged=False,
+                return_abs_filtered_fields=False, return_masked_abs_filtered_fields=False):
+        """Compute the WST coefficients associated with a 3D galaxy catalog.
+
+        Args:
+            galaxies (catalog): Catalog of galaxies
+            survey_geometry (bool, optional): Should we take into account a specific survey geometry, or just use periodic boundary conditions? Defaults to True.
+            return_mask_averaged (bool, optional): For debug, return the S_1 coefficients as computed after erosion. Defaults to False.
+            return_full_averaged (bool, optional): For debug, return the S_1 coefficients as computed without erosion. Defaults to False.
+            return_abs_filtered_fields (bool, optional): For debug, return the modulus of the wavelet transform before erosion. Defaults to False.
+            return_masked_abs_filtered_fields (bool, optional): For debug, return the modulus of the wavelet transform after erosion. Defaults to False.
+
+        Returns:
+            tuple: Tuple containing the S_0 coefficients, S_1 coefficients, S_2 coefficients (optional), and various debug variables (optional).
+        """
+        deltan = x
+        
+        # Make sure wavelets and masks (when needed) are loaded
+        mask_wt = survey_geometry and self.erosion # Shall we do erosion?
+        if self.fwavelets is None:
+            self.build_wavelets()
+        if mask_wt and self.wavelet_masks is None:
+            self.compute_wavelet_masks()
+
+        print("Computing statistics...")
+        
+        # Wavelet transform
+        fdeltan = scp.fft.fftn(deltan, axes=(-3, -2, -1), workers=-1).astype(np.complex64)
+        ffiltered = fdeltan * self.fwavelets
+        filtered = scp.fft.ifftn(ffiltered, axes=(-3, -2, -1), workers=-1).astype(np.complex64)
+        
+        # Modulus of the WT
+        abs_filtered = np.abs(filtered)
+
+        # Moments S0
+        print("Computing S0 coefficients...")
+        absdeltan = np.absolute(deltan)
+        wavelet_moments_S0 = np.zeros((self.moments.shape[0]), dtype=np.float32)
+        for i in range(self.moments.shape[0]):
+             wavelet_moments_S0[i] = (absdeltan ** self.moments[i]).mean(axis=(-3, -2, -1))
+        if mask_wt: wavelet_moments_S0 /= self.survey_mask_vol_fraction # Normalization correction
+
+        # Moments S1
+        print("Computing S1 coefficients...")
+        if self.nb_orientations != 0:
+            abs_filtered = np.reshape(abs_filtered, (-1,) + abs_filtered.shape[-3:])
+            if mask_wt:
+                self.wavelet_masks = np.reshape(self.wavelet_masks, (-1,) + self.wavelet_masks.shape[-3:])
+                self.wavelet_masks_vol_fraction = np.reshape(self.wavelet_masks_vol_fraction, (-1,))
+        wavelet_moments_S1 = np.zeros((self.moments.shape[0], abs_filtered.shape[0]), dtype=np.float32)
+        if not mask_wt:
+            modwt = abs_filtered
+        else:
+            modwt = abs_filtered * self.wavelet_masks
+        for i in range(self.moments.shape[0]):
+             wavelet_moments_S1[i] = (modwt ** self.moments[i]).mean(axis=(-3, -2, -1))
+        if mask_wt: wavelet_moments_S1 /= self.wavelet_masks_vol_fraction # Normalization correction
+        if self.nb_orientations != 0:
+            abs_filtered = np.reshape(abs_filtered, (self.J*self.Q, self.nb_orientations) + abs_filtered.shape[-3:])
+            wavelet_moments_S1 = np.reshape(wavelet_moments_S1, (self.moments.shape[0], self.J*self.Q, self.nb_orientations))
+            if mask_wt:
+                self.wavelet_masks = np.reshape(self.wavelet_masks, (self.J*self.Q, self.nb_orientations) + self.wavelet_masks.shape[-3:])
+                self.wavelet_masks_vol_fraction = np.reshape(self.wavelet_masks_vol_fraction, (self.J*self.Q, self.nb_orientations))
+
+        # Moments S2
+        if self.scattering:
+            print("Computing S2 coefficients...")
+            abs_filtered_f = scp.fft.fftn(abs_filtered, axes=(-3, -2, -1), workers=-1).astype(np.complex64)
+            cnt = 0
+            if self.nb_orientations != 0:
+                wavelet_moments_S2 = np.zeros((self.moments.shape[0], self.J*self.Q * (self.J*self.Q - 1) // 2, self.nb_orientations, self.nb_orientations), dtype=np.float32)
+                for j1 in range(self.J*self.Q - 1):
+                    nb_scales = self.J*self.Q - 1 - j1
+                    for t1 in range(self.nb_orientations):
+                        curr_field_f = abs_filtered_f[j1, t1] * self.fwavelets[j1 + 1:]
+                        curr_field = scp.fft.ifftn(curr_field_f, axes=(-3, -2, -1), workers=-1).astype(np.complex64)
+                        curr_field = np.abs(curr_field)
+                        if mask_wt:
+                            curr_field *= self.wavelet_masks[j1 + 1:]
+                        for i in range(self.moments.shape[0]):
+                            wavelet_moments_S2[i, cnt:cnt + nb_scales, t1] = (curr_field ** self.moments[i]).mean(axis=(-3, -2, -1))
+                        if mask_wt: wavelet_moments_S2[i, cnt:cnt + nb_scales, t1] /= self.wavelet_masks_vol_fraction[j1 + 1:] # Normalization correction
+                    cnt += self.J*self.Q - 1 - j1
+            else:
+                wavelet_moments_S2 = np.zeros((self.moments.shape[0], self.J*self.Q * (self.J*self.Q - 1) // 2), dtype=np.float32)
+                for j1 in range(self.J*self.Q - 1):
+                    nb_scales = self.J*self.Q - 1 - j1
+                    curr_field_f = abs_filtered_f[j1] * self.fwavelets[j1 + 1:]
+                    curr_field = scp.fft.ifftn(curr_field_f, axes=(-3, -2, -1), workers=-1).astype(np.complex64)
+                    curr_field = np.abs(curr_field)
+                    if mask_wt:
+                        curr_field *= self.wavelet_masks[j1 + 1:]
+                    for i in range(self.moments.shape[0]):
+                        wavelet_moments_S2[i, cnt:cnt + nb_scales] = (curr_field ** self.moments[i]).mean(axis=(-3, -2, -1))
+                    if mask_wt: wavelet_moments_S2[i, cnt:cnt + nb_scales] /= self.wavelet_masks_vol_fraction[j1 + 1:] # Normalization correction
+                    cnt += self.J*self.Q - 1 - j1
+        
+        print("Done!")
+
+        output = (wavelet_moments_S0, wavelet_moments_S1,)
+        if self.scattering:
+            output += (wavelet_moments_S2,)
 
         # For debug
         if return_mask_averaged:
