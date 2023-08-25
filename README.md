@@ -12,3 +12,13 @@ conda install -c bccp nbodykit
 pip install -r requirements.txt
 pip install .
 ```
+
+## TODO
+
+* Masking for S0
+* Better strategy to send tensors on consistent devices
+* Check consistency of masking and wavelets creation in GalaxyScatteringOp class
+* Documentation
+* Typing
+* Distinction between tuple and list in parameters
+* Requirements: at least Python 3.8 (for typing), torch 2.0
