@@ -1,24 +1,15 @@
 # Wavelet Scattering Transform for Galaxy Clustering Analysis
 
-This package enables the computation of the Wavelet Scattering Tranform (WST) on Galaxy Catalogs as described in Regaldo-Saint Blancard+in prep.
-Check out the examples/ folder for use cases.
+This package enables the computation of the Wavelet Scattering Tranform (WST) on galaxy catalogs. It also applies to any kind of 3D fields (e.g. cosmological density fields).
 
-This package is not GPU-accelerated yet, but might be in the future. In the meantime, for GPU-acceleration, we recommend using [Kymatio](https://github.com/kymatio/kymatio) which implements a 3D version of the WST.
+Check out the examples/ folder for use cases.
 
 ## Install
 
+This package relies on [PyTorch](https://pytorch.org/) (version beyond 2.0).
+Mesh creation from galaxy catalogs also requires [nbodykit](https://nbodykit.readthedocs.io/en/latest/).
+
 ```bash
-conda install -c bccp nbodykit
 pip install -r requirements.txt
 pip install .
 ```
-
-## TODO
-
-* Masking for S0
-* Better strategy to send tensors on consistent devices
-* Check consistency of masking and wavelets creation in GalaxyScatteringOp class
-* Documentation
-* Typing
-* Distinction between tuple and list in parameters
-* Requirements: at least Python 3.8 (for typing), torch 2.0

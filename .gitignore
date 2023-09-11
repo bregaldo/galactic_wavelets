@@ -1,5 +1,7 @@
 *.fits
 *.fits.gz
+check_chirag/
+lucy/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
