@@ -49,29 +49,22 @@ class ScatteringOp(torch.nn.Module):
                  use_mp: bool = True,
                  device: Union[str, int, torch.device] = "cpu"):
         """Constructor.
-        Configure the wavelet parameters (J, Q, kc, angular_width, aliasing, erosion_threshold, fwavelets, wavelet_masks),
-        the coefficients that we want to compute (moments, scattering),
-        and the mesh grid defined from galaxy catalogs (Ngrid, BoxSize, BoxCenter, los, los_auto_detection, kmax, boxsize_powoftwomult, boxsize_auto_adjustment, FKP_weights, P0).
-
-        If wavelets need to be recomputed, it is safer to create a new object.
 
         Args:
-            J (int): Wavelet bank parameter. Number of j values (i.e. octaves).
+            grid_size (Tuple[int, int, int]): Grid size.
+            J (int):  Wavelet bank parameter. Number of j values (i.e. octaves).
             Q (int, optional): Wavelet bank parameter. Number of q values (i.e. scales per octave). Defaults to 1.
             kc (float, optional): Wavelet bank parameter. Cutoff frequency of the mother wavelet. Defaults to np.pi.
-            angular_width (float, optional): Wavelet bank parameter. Angular width of the gaussian function used to orient the wavelets. Defaults to None.
-            aliasing (bool, optional): Shall we build aliased wavelets when kc > pi/2? Defaults to True.
-            erosion_threshold (float, optional): Erosion threshold that controls the erosion of the wavelet transform according to the survey geometry. Defaults to None.
-            fwavelets (array, optional): Bank of wavelets in Fourier space. Defaults to None, i.e. will be computed.
-            wavelet_masks (array, optional): Erosion masks for each wavelet. Defaults to None, i.e. will be computed.
-            moments (tuple, optional): Tuple of exponenets used to compute the WST coefficients. Defaults to (1/2, 1, 2).
-            scattering (bool, optional): Shall we compute S_2 coefficients? Defaults to False.
-            Ngrid (tuple, optional): Tuple of length 3 describing the mesh grid size on which galaxy catalogs are mapped to. Defaults to (256, 256, 256).
-            BoxSize (float or array, optional): Float or array of length 3 describing the mesh physical size (in Mpc/h). Defaults to 1000.0.
-            BoxCenter (list, optional): Array of length 3 corresponding to the mesh physical center (in Mpc/h). Defaults to [0.0, 0.0, 0.0].
-            los (array, optional): Array of length 3 defining a line of sight for the orientation of the wavelets. Defaults to None.
-            los_auto_detection (bool, optional): Auto-detection of the line of sight relying on BoxCenter. Defaults to True.
-            use_mp (bool, optional): Shall we use multiprocessing to compute the wavelets and theirs masks? Defaults to True.
+            angular_width (Optional[float], optional): Wavelet bank parameter. Angular width of the gaussian function used to orient the wavelets. Defaults to None.
+            aliasing (bool, optional): Whether to use aliased wavelets. Defaults to True.
+            los (Tuple[float, float, float], optional): Line-of-sight for the orientation of wavelets. Defaults to (0, 0, 1).
+            grid_steps (Tuple[float, float, float], optional): Grid steps. Defaults to (1, 1, 1).
+            erosion_threshold (Optional[float], optional): Erosion threshold that controls the erosion of the wavelet transform according to the survey mask. Defaults to None.
+            survey_mask (Optional[torch.Tensor], optional): Survey mask. Defaults to None.
+            moments (List[float], optional): Exponents used to compute the WST coefficients. Defaults to [1/2, 1, 2].
+            scattering (bool, optional): Whether to compute S_2 coefficients. Defaults to False.
+            use_mp (bool, optional): Whether to use multiprocessing to compute the wavelets. Defaults to True.
+            device (Union[str, int, torch.device], optional): Device. Defaults to "cpu".
         """
         super().__init__()
 
@@ -100,7 +93,7 @@ class ScatteringOp(torch.nn.Module):
         self.to(device)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
-        """Compute the WST coefficients associated with a 3D galaxy catalog.
+        """Compute the WST coefficients of the input field.
 
         Args:
             x (torch.Tensor): Input field.
@@ -177,22 +170,19 @@ class GalaxyCatalogScatteringOp(ScatteringOp):
                  P0: float = 1e4,
                  **kwargs):
         """Constructor.
-        Configure the wavelet parameters (J, Q, kc, angular_width, aliasing, erosion_threshold, fwavelets, wavelet_masks),
-        the coefficients that we want to compute (moments, scattering),
-        and the mesh grid defined from galaxy catalogs (Ngrid, BoxSize, BoxCenter, los, los_auto_detection, kmax, boxsize_powoftwomult, boxsize_auto_adjustment, FKP_weights, P0).
-
-        If wavelets need to be recomputed, it is safer to create a new object.
 
         Args:
             J (int): Wavelet bank parameter. Number of j values (i.e. octaves).
-            box_size (float or array, optional): Float or array of length 3 describing the mesh physical size (in Mpc/h). Defaults to 1000.0.
-            box_center (list, optional): Array of length 3 corresponding to the mesh physical center (in Mpc/h). Defaults to [0.0, 0.0, 0.0].
-            los_auto_detection (bool, optional): Auto-detection of the line of sight relying on BoxCenter. Defaults to True.
+            box_size (Tuple[float, float, float], optional): Mesh physical size (in Mpc/h). Defaults to (1000, 1000, 1000).
+            box_center (Tuple[float, float, float], optional): Mesh physical center (in Mpc/h). Defaults to (0, 0, 0).
+            los_auto_detection (bool, optional): Auto-detection of the line of sight relying on box_center. Defaults to True.
             kmax (float, optional): If boxsize_autoadjustment is True, correspond to the smallest spatial frequency we want to probe in the survey. Defaults to 0.5.
-            boxsize_powoftwomult (int, optional): If boxsize_autoadjustment is True, force self.Ngrid elements to be multiples of 2^boxsize_powoftwomult. Defaults to 1.
-            boxsize_auto_adjustment (bool, optional): Auto-adjustment of self.BoxSize and self.Ngrid given kmax and boxsize_powoftwomult. Defaults to True.
-            FKP_weights (bool, optional): Shall we define meshes involving FKP weights (see self.create_mesh and Feldman+1994)? Defaults to False.
+            boxsize_powoftwomult (int, optional): If boxsize_autoadjustment is True, force self.grid_size elements to be multiples of 2^boxsize_powoftwomult. Defaults to 1.
+            boxsize_auto_adjustment (bool, optional): Auto-adjustment of self.box_size and self.grid_size given kmax and boxsize_powoftwomult. Defaults to True.
+            FKP_weights (bool, optional): Whether to define meshes with FKP weights (see self.create_mesh and Feldman+1994). Defaults to False.
             P0 (float, optional): Constant involved in the definition of FKP weights. Defaults to 1e4.
+            **kwargs: Additional arguments to configure the wavelet transform (see ScatteringOp.__init__).
+
         """
         # For FKP weights
         self.FKP_weights = FKP_weights
@@ -237,7 +227,7 @@ class GalaxyCatalogScatteringOp(ScatteringOp):
                     ret_ngal: bool = False,
                     ret_alpha: bool = False) -> Tuple[Union[torch.Tensor, float]]:
         """Build a regular mesh from a galaxy catalog.
-        The size of the mesh and origin of coordinates are fixed by self.Ngrid, self.BoxSize, and self.BoxCenter variables.
+        The size of the mesh and origin of coordinates are fixed by self.grid_size, self.box_size, and self.box_center variables.
 
         If survey_geometry is False, the mesh just corresponds to a number density field of galaxies minus its mean, assuming periodic boundary conditions.
         galaxies is expected to already include a key of cartesian positions called "Position".
@@ -251,10 +241,10 @@ class GalaxyCatalogScatteringOp(ScatteringOp):
         Number density fields are computed from point clouds using Triangular Shaped Cloud mass assignment scheme.
 
         Args:
-            galaxies (catalog): Catalog of galaxies.
-            randoms (catalog, optional): Catalog of random points describing the geometry. Defaults to None.
+            galaxies (ArrayCatalog): Catalog of galaxies.
+            randoms (Optional[ArrayCatalog], optional): Catalog of random points describing the geometry. Defaults to None.
             survey_geometry (bool, optional): Should we take into account a specific survey geometry, or just use periodic boundary conditions? Defaults to True.
-            cosmo (nbodykit.cosmology.cosmology.Cosmology, optional): Choice of cosmology. Defaults to None (get SimBIG fiducial cosmology).
+            cosmo (Optional[Cosmology], optional): Choice of cosmology. Defaults to None (get SimBIG fiducial cosmology).
             normalize (bool, optional): Whether we normalize the field similarly to the FKP field. Only coded for survey geometry. Defaults to True.
             ret_shot_noise (bool, optional): Return shot noise estimate. This should be consistent with nbodykit FFTPower/ConvolvedFFTPower estimates. Defaults to False.
             ret_norm (bool, optional): Return normalization factor. This should be consistent with nbodykit ConvolvedFFTPower normalization factor. Defaults to False.
@@ -432,14 +422,14 @@ class GalaxyCatalogScatteringOp(ScatteringOp):
     def forward(self,
                 galaxies: ArrayCatalog,
                 **kwargs) -> Tuple[Union[torch.Tensor, float], ...]:
-        """Compute the WST coefficients associated with a 3D galaxy catalog.
+        """Compute the WST coefficients from a 3D galaxy catalog.
            Additional arguments are passed to self.create_mesh.
 
         Args:
             galaxies (catalog): Catalog of galaxies
             kwargs: See self.create_mesh.
         Returns:
-            tuple: Tuple containing the S_0 coefficients, S_1 coefficients, S_2 coefficients (optional), shot noise (optional), normalization factor (optional), and various debug variables (optional).
+            tuple: Tuple containing the S_0 coefficients, S_1 coefficients, S_2 coefficients (optional), shot noise (optional), normalization factor (optional).
         """
         # Build mesh
         ret = self.create_mesh(galaxies, **kwargs)

@@ -23,6 +23,21 @@ class WaveletTransform3D(torch.nn.Module):
                  survey_mask: Optional[torch.Tensor] = None,
                  use_mp: bool = True,
                  device: Union[str, int, torch.device] = "cpu"):
+        """Constructor.
+        
+        Args:
+            grid_size (Tuple[int, int, int]): Grid size.
+            J (int):  Number of j values (i.e. octaves).
+            Q (int, optional): Number of q values (i.e. scales per octave). Defaults to 1.
+            kc (float, optional): Cutoff frequency of the mother wavelet. Defaults to np.pi.
+            angular_width (Optional[float], optional): Angular width of the gaussian function used to orient the wavelets. Defaults to None.
+            aliasing (bool, optional): Whether to use aliased wavelets. Defaults to True.
+            los (Tuple[float, float, float], optional): Line-of-sight for the orientation of wavelets. Defaults to (0, 0, 1).
+            grid_steps (Tuple[float, float, float], optional): Grid steps. Defaults to (1, 1, 1).
+            erosion_threshold (Optional[float], optional): Erosion threshold that controls the erosion of the wavelet transform according to the survey mask. Defaults to None.
+            survey_mask (Optional[torch.Tensor], optional): Survey mask. Defaults to None.
+            use_mp (bool, optional): Whether to use multiprocessing to compute the wavelets. Defaults to True.
+            device (Union[str, int, torch.device], optional): Device. Defaults to "cpu"."""
         super().__init__()
 
         # Wavelet parameters
@@ -156,6 +171,19 @@ class WaveletTransform3D(torch.nn.Module):
                 jmin: int = 0,
                 jmax: Optional[int] = None,
                 ret_unmasked: bool = False) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        """Compute the wavelet transform of the input field x.
+        If self.erosion is True, then the wavelet transform is eroded according to the survey mask.
+        If ret_unmasked is True, then the unmasked wavelet transform is also returned.
+
+        Args:
+            x (torch.Tensor): Input field.
+            jmin (int, optional): Minimum j value. Defaults to 0.
+            jmax (Optional[int], optional): Maximum j value. Defaults to None.
+            ret_unmasked (bool, optional): Whether to return the unmasked wavelet transform. Defaults to False.
+
+        Returns:
+            Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]: Wavelet transform of the input field.
+        """
         if jmax is None:
             jmax = self.J*self.Q
         xf = torch.fft.fftn(x, dim=(-3, -2, -1))
