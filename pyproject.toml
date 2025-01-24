@@ -10,14 +10,16 @@ name = "galactic_wavelets"
 version = "0.1"
 description = "Wavelet Scattering Transform for 3D Cosmological Fields"
 readme = "README.md"
-readme-content-type = "text/markdown"
 requires-python = ">=3.8"
-license = { text = "BSD 3-Clause License" }
+license = { file = "LICENSE" }
 authors = [
     { name = "Bruno Régaldo-Saint Blancard", email = "bregaldo@flatironinstitute.org" }
 ]
 dependencies = [
     "torch>=2.0",
+    "numpy",
+    "scipy",
+    "matplotlib",
 ]
 classifiers = [
     "License :: OSI Approved :: BSD License",
@@ -26,7 +28,12 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-cosmo = ["nbodykit>=0.3.15"]
+cosmo = [
+    "cython",
+    "mpi4py",
+    "nbodykit[extras]>=0.3.15",
+    "astropy",
+]
 
 [project.urls]
 source = "https://github.com/bregaldo/galactic_wavelets"

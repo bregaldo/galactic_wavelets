@@ -1,7 +1,0 @@
-numpy
-matplotlib
-scipy
-cython
-mpi4py
-nbodykit
-torch>=2.0
