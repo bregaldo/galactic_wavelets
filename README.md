@@ -1,6 +1,6 @@
 # Wavelet Scattering Transform for 3D Cosmological Fields
 
-**⚠️ Note:** This package is in an early development stage. While it provides useful functionality, some features may be incomplete or subject to change.
+⚠️ *This package is in an early development stage. While it provides useful functionality, some features may be incomplete or subject to change.*
 
 This package provides tools to compute the **Wavelet Scattering Transform (WST)** on 3D fields, with specialized features for galaxy clustering analyses. Built on **[PyTorch](https://pytorch.org/)** for GPU acceleration and differentiability, it optionnally leverages [`nbodykit`](https://nbodykit.readthedocs.io/en/latest/) for processing galaxy catalogs. For applications non-specific to cosmology, the dependency on nbodykit is made optional. See installation instructions below.
 
