@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["galactic_wavelets"]
+
+[project]
+name = "galactic_wavelets"
+version = "0.1"
+description = "Wavelet Scattering Transform for 3D Cosmological Fields"
+readme = "README.md"
+readme-content-type = "text/markdown"
+requires-python = ">=3.8"
+license = { text = "BSD 3-Clause License" }
+authors = [
+    { name = "Bruno Régaldo-Saint Blancard", email = "bregaldo@flatironinstitute.org" }
+]
+dependencies = [
+    "torch>=2.0",
+]
+classifiers = [
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+[project.optional-dependencies]
+cosmo = ["nbodykit>=0.3.15"]
+
+[project.urls]
+source = "https://github.com/bregaldo/galactic_wavelets"
