@@ -51,7 +51,6 @@ def download_boss_data(download_dir):
                                                       filename=file_path,
                                                       reporthook=print_download_progress)
 
-            print()
             print("Download finished. Extracting files.")
 
             # unzip the file

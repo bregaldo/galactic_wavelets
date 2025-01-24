@@ -1,3 +1,5 @@
+from typing import Optional, Tuple, List, Union
+import torch
 import numpy as np 
 import nbodykit.lab as NBlab
 from astropy.stats import scott_bin_width
