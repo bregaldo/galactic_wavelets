@@ -34,6 +34,9 @@ cosmo = [
     "nbodykit[extras]>=0.3.15",
     "astropy",
 ]
+dev = [
+    "pytest",
+]
 
 [project.urls]
 source = "https://github.com/bregaldo/galactic_wavelets"
