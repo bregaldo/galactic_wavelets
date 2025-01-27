@@ -1,8 +1,7 @@
-import pytest
 import torch
-import numpy as np
 
 from galactic_wavelets.wavelet_transform import WaveletTransform3D
+
 
 def test_wtransform_init():
     grid_size = (32, 32, 32)
@@ -15,14 +14,17 @@ def test_wtransform_init():
     use_mp = True
     device = "cpu"
 
-    wtransform = WaveletTransform3D(grid_size=grid_size,
-                                    J=J, Q=Q,
-                                    kc=kc,
-                                    angular_width=angular_width,
-                                    aliasing=aliasing,
-                                    los=los,
-                                    use_mp=use_mp,
-                                    device=device)
+    wtransform = WaveletTransform3D(
+        grid_size=grid_size,
+        J=J,
+        Q=Q,
+        kc=kc,
+        angular_width=angular_width,
+        aliasing=aliasing,
+        los=los,
+        use_mp=use_mp,
+        device=device,
+    )
 
     assert wtransform.grid_size == grid_size
     assert wtransform.J == J
@@ -34,19 +36,19 @@ def test_wtransform_init():
     assert wtransform.use_mp == use_mp
     assert wtransform.device == torch.device(device)
 
+
 def test_wtransform_zero_input():
     grid_size = (32, 32, 32)
     J, Q = 3, 1
 
-    wtransform = WaveletTransform3D(grid_size=grid_size,
-                                    J=J, Q=Q,
-                                    angular_width=None,
-                                    device="cpu")
+    wtransform = WaveletTransform3D(
+        grid_size=grid_size, J=J, Q=Q, angular_width=None, device="cpu"
+    )
 
     wavelets = wtransform.get_wavelets()
-    assert wavelets.shape == (J*Q, 1, *grid_size)
+    assert wavelets.shape == (J * Q, 1, *grid_size)
 
     x = torch.zeros(grid_size)
     y = wtransform(x)
-    assert y.shape == (J*Q, 1, *grid_size)
+    assert y.shape == (J * Q, 1, *grid_size)
     assert torch.allclose(y, torch.zeros_like(y))

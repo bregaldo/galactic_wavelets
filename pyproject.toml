@@ -35,6 +35,7 @@ cosmo = [
     "astropy",
 ]
 dev = [
+    "pre-commit",
     "pytest",
     "ruff",
 ]
